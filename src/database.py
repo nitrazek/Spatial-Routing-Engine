@@ -1,9 +1,8 @@
-import os
 from sqlalchemy import text
 from sqlmodel import create_engine, Session, SQLModel
 
 class DatabaseManager:
-    DB_URL = os.getenv("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/postgres")
+    DB_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/postgres"
     
     engine = create_engine(DB_URL, echo=False, pool_pre_ping=True)
 
