@@ -3,13 +3,14 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 
+from scripts import DATA_DIR
 from src import database
 
 
 def prepare_data() -> gpd.GeoDataFrame:
-    car_data_path = Path("local", "export.geojson")
-    public_data_path = Path("local", "gtfs")
-    pr_data_path = Path("local", "parkingi_pr.geojson")
+    car_data_path = DATA_DIR/"export.geojson"
+    # public_data_path = DATA_DIR/"gtfs"
+    # pr_data_path = DATA_DIR/"parkingi_pr.geojson"
     
     car_gdf = gpd.read_file(car_data_path)
     car_gdf['maxspeed'] = pd.to_numeric(car_gdf['maxspeed'], errors='coerce')
