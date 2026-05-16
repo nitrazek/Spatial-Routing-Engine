@@ -12,6 +12,7 @@ dependencies = [
     "psycopg[binary]>=3.3.4",
     "requests>=2.28",
     "sqlmodel>=0.0.38",
+    "typer>=0.25.1",
 ]
 
 [build-system]
