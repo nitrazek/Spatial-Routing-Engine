@@ -11,10 +11,20 @@ app = typer.Typer()
 console = Console()
 
 @app.command()
-def calculate_route(source: tuple[float, float], target: tuple[float, float], mode: enums.RouteMode | None = None):
-    modes = [mode] if mode else list(enums.RouteMode)
-    for m in modes:
+def calculate_route(
+    source: tuple[float, float],
+    target: tuple[float, float],
+    mode: list[enums.RouteMode] = typer.Option(
+        None, 
+        "--mode", "-m"
+    )
+):
+    if not mode:
+        print("You have to pass at least one mode to calculate route.")
+        return
 
+    for m in mode:
+        # Tu będzie wywołanie algorytmu
         nodes = [
             (53.1325, 23.1688),
             (52.8800, 22.1500),
