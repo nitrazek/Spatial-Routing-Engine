@@ -48,6 +48,8 @@ nodes, edges = ox.graph_to_gdfs(G)
 print(f"nodes: {len(nodes)}")
 print(f"edges: {len(edges)}")
 
+# convert multilinestring entries into
+# separate linestring entries
 edges = edges.explode(index_parts=False).reset_index()
 
 
@@ -71,6 +73,20 @@ def clean_highway(value) -> str:
         return "unclassified"
 
     return str(value)
+
+
+def clean_osmid(v):
+    v = first(v)
+    if v is None:
+        return None
+    return int(v)
+
+
+def clean_name(v):
+    v = first(v)
+    if v is None:
+        return None
+    return str(v)
 
 
 def parse_speed(value, highway) -> int:
@@ -120,7 +136,11 @@ edges = edges[available_cols].copy()
 edges["source"] = edges["u"].astype("int64")
 edges["target"] = edges["v"].astype("int64")
 
+# first item instead of list
+edges["osmid_clean"] = edges["osmid"].apply(clean_osmid)
+edges["name_clean"] = edges["name"].apply(clean_name)
 edges["highway_clean"] = edges["highway"].apply(clean_highway)
+edges["oneway_clean"] = edges["oneway"].apply(clean_oneway)
 
 edges["speed_kmh"] = edges.apply(
     lambda r: parse_speed(
@@ -129,8 +149,6 @@ edges["speed_kmh"] = edges.apply(
     ),
     axis=1
 )
-
-edges["oneway_clean"] = edges["oneway"].apply(clean_oneway)
 
 # costs
 edges["cost"] = edges.apply(
@@ -148,6 +166,7 @@ edges["reverse_cost"] = edges.apply(
     axis=1
 )
 
+# normalization - geom is postGIS convention
 edges["geom"] = edges["geometry"]
 
 edges["id"] = range(1, len(edges) + 1)
@@ -155,10 +174,10 @@ edges["id"] = range(1, len(edges) + 1)
 # edge table
 edges_out = edges[[
     "id",
-    "osmid",
+    "osmid_clean",
+    "name_clean",
     "source",
     "target",
-    "name",
     "highway_clean",
     "speed_kmh",
     "oneway_clean",
@@ -169,10 +188,13 @@ edges_out = edges[[
 ]].copy()
 
 edges_out = edges_out.rename(columns={
+    "osmid_clean": "osmid",
+    "name_clean": "name",
     "highway_clean": "highway",
     "oneway_clean": "oneway",
     "length": "length_m"
 })
+
 
 # geodataframe fix
 edges_out = gpd.GeoDataFrame(
@@ -227,7 +249,6 @@ edges_out.to_postgis(
 print("Creating indexes...")
 
 with engine.begin() as conn:
-
     conn.execute(text("""
         CREATE INDEX IF NOT EXISTS road_nodes_geom_idx
         ON road_nodes
