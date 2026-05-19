@@ -24,7 +24,7 @@ DEFAULT_SPEEDS = {
     "unclassified": 40
 }
 
-GRAPH_FILE = DATA_DIR / "warsaw.graphml"
+GRAPH_FILE = DATA_DIR / "streets" / "warsaw.graphml"
 if GRAPH_FILE.is_file():
     print(f"Loading cached graph: {GRAPH_FILE}")
     G = ox.load_graphml(GRAPH_FILE)
