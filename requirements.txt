@@ -1,3 +1,5 @@
 requests>=2.28
 beautifulsoup4>=4.12
 sqlmodel>=0.0.38
+osmnx~=2.1
+geopandas~=1.1
