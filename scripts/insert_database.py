@@ -2,12 +2,13 @@ import re
 
 import osmnx as ox
 import geopandas as gpd
-
 from sqlalchemy import text
 
 from scripts import DATA_DIR
 from src.database import DatabaseManager
 
+
+engine = DatabaseManager.engine
 
 PLACE = "Warsaw, Poland"
 
@@ -23,12 +24,7 @@ DEFAULT_SPEEDS = {
     "unclassified": 40
 }
 
-DATA_DIR.mkdir(exist_ok=True)
-
 GRAPH_FILE = DATA_DIR / "warsaw.graphml"
-
-engine = DatabaseManager.engine
-
 if GRAPH_FILE.is_file():
     print(f"Loading cached graph: {GRAPH_FILE}")
     G = ox.load_graphml(GRAPH_FILE)
