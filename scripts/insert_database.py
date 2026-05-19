@@ -1,48 +1,15 @@
 import re
+
 import osmnx as ox
 import geopandas as gpd
+
 from sqlalchemy import text
 
+from scripts import DATA_DIR
 from src.database import DatabaseManager
 
-# ============================================================
-# CONFIG
-# ============================================================
 
 PLACE = "Warsaw, Poland"
-
-engine = DatabaseManager.engine
-
-# ============================================================
-# DOWNLOAD FROM OVERPASS
-# ============================================================
-
-print("Downloading graph from Overpass...")
-
-G = ox.graph_from_place(
-    PLACE,
-    network_type="drive",
-    simplify=True
-)
-
-# ============================================================
-# GRAPH → GEODATAFRAMES
-# ============================================================
-
-nodes, edges = ox.graph_to_gdfs(G)
-
-print(f"nodes: {len(nodes)}")
-print(f"edges: {len(edges)}")
-
-# ============================================================
-# FIX MULTILINESTRING
-# ============================================================
-
-edges = edges.explode(index_parts=False).reset_index()
-
-# ============================================================
-# HELPERS
-# ============================================================
 
 DEFAULT_SPEEDS = {
     "motorway": 140,
@@ -55,6 +22,33 @@ DEFAULT_SPEEDS = {
     "living_street": 20,
     "unclassified": 40
 }
+
+DATA_DIR.mkdir(exist_ok=True)
+
+GRAPH_FILE = DATA_DIR / "warsaw.graphml"
+
+engine = DatabaseManager.engine
+
+if GRAPH_FILE.is_file():
+    print(f"Loading cached graph: {GRAPH_FILE}")
+    G = ox.load_graphml(GRAPH_FILE)
+else:
+    print("Downloading graph from Overpass...")
+    G = ox.graph_from_place(
+        PLACE,
+        network_type="drive",
+        simplify=True
+    )
+
+    print(f"Saving graph cache: {GRAPH_FILE}")
+    ox.save_graphml(G, GRAPH_FILE)
+
+nodes, edges = ox.graph_to_gdfs(G)
+
+print(f"nodes: {len(nodes)}")
+print(f"edges: {len(edges)}")
+
+edges = edges.explode(index_parts=False).reset_index()
 
 
 def first(value):
@@ -70,7 +64,7 @@ def first(value):
     return value
 
 
-def clean_highway(value):
+def clean_highway(value) -> str:
     value = first(value)
 
     if value is None:
@@ -79,8 +73,7 @@ def clean_highway(value):
     return str(value)
 
 
-def parse_speed(value, highway):
-
+def parse_speed(value, highway) -> int:
     highway = clean_highway(highway)
 
     value = first(value)
@@ -96,23 +89,15 @@ def parse_speed(value, highway):
     return DEFAULT_SPEEDS.get(highway, 50)
 
 
-def clean_oneway(value):
-
+def clean_oneway(value) -> bool:
     value = first(value)
-
     return value in [True, "yes", "1", 1]
 
 
-def calculate_cost(length_m, speed_kmh):
-
+def calculate_cost(length_m, speed_kmh) -> float:
     speed_mps = speed_kmh * 1000 / 3600
-
     return length_m / speed_mps
 
-
-# ============================================================
-# SAFE EDGE PREPARATION
-# ============================================================
 
 print("Preparing edges...")
 
@@ -132,16 +117,8 @@ available_cols = [c for c in required_cols if c in edges.columns]
 
 edges = edges[available_cols].copy()
 
-# ============================================================
-# SOURCE / TARGET
-# ============================================================
-
 edges["source"] = edges["u"].astype("int64")
 edges["target"] = edges["v"].astype("int64")
-
-# ============================================================
-# CLEAN ATTRIBUTES
-# ============================================================
 
 edges["highway_clean"] = edges["highway"].apply(clean_highway)
 
@@ -155,10 +132,7 @@ edges["speed_kmh"] = edges.apply(
 
 edges["oneway_clean"] = edges["oneway"].apply(clean_oneway)
 
-# ============================================================
-# COSTS
-# ============================================================
-
+# costs
 edges["cost"] = edges.apply(
     lambda r: calculate_cost(
         r["length"],
@@ -174,18 +148,11 @@ edges["reverse_cost"] = edges.apply(
     axis=1
 )
 
-# ============================================================
-# GEOMETRY
-# ============================================================
-
 edges["geom"] = edges["geometry"]
 
 edges["id"] = range(1, len(edges) + 1)
 
-# ============================================================
-# FINAL EDGE TABLE
-# ============================================================
-
+# edge table
 edges_out = edges[[
     "id",
     "osmid",
@@ -207,20 +174,14 @@ edges_out = edges_out.rename(columns={
     "length": "length_m"
 })
 
-# ============================================================
-# GEODATAFRAME FIX
-# ============================================================
-
+# geodataframe fix
 edges_out = gpd.GeoDataFrame(
     edges_out,
     geometry="geom",
     crs="EPSG:4326"
 )
 
-# ============================================================
-# PREPARE NODES
-# ============================================================
-
+# prepare nodes
 nodes = nodes.reset_index()
 
 nodes = nodes.rename(columns={
@@ -241,16 +202,9 @@ nodes_out = gpd.GeoDataFrame(
     crs="EPSG:4326"
 )
 
-# ============================================================
-# REMOVE DUPLICATE COLUMNS
-# ============================================================
-
+# remove dupliacte columns
 edges_out = edges_out.loc[:, ~edges_out.columns.duplicated()]
 nodes_out = nodes_out.loc[:, ~nodes_out.columns.duplicated()]
-
-# ============================================================
-# SAVE TO POSTGIS
-# ============================================================
 
 print("Saving nodes...")
 
@@ -269,10 +223,6 @@ edges_out.to_postgis(
     if_exists="replace",
     index=False
 )
-
-# ============================================================
-# INDEXES
-# ============================================================
 
 print("Creating indexes...")
 
@@ -299,14 +249,3 @@ with engine.begin() as conn:
         CREATE INDEX IF NOT EXISTS road_edges_target_idx
         ON road_edges(target);
     """))
-
-# ============================================================
-# DONE
-# ============================================================
-
-print("======================================")
-print("DONE")
-print("======================================")
-print(f"nodes: {len(nodes_out)}")
-print(f"edges: {len(edges_out)}")
-print("======================================")
