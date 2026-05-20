@@ -26,10 +26,11 @@ DatabaseManager.create_db_and_tables()
 
 GTFS_DIR = DATA_DIR / "public_transport"
 
-# safety floor for travel time between two stops (seconds)
 MIN_TRAVEL_TIME_S = 20
-# upper sanity bound (drops obvious data glitches, e.g. overnight wraps)
 MAX_TRAVEL_TIME_S = 60 * 60 * 3
+
+WALK_SPEED_KMH = 5
+WALK_RADIUS_M = 200
 
 
 def parse_gtfs_time(series: pd.Series) -> pd.Series:
@@ -100,23 +101,19 @@ stop_times = stop_times.drop(columns=["arrival_time", "departure_time"])
 print("Building consecutive stop pairs per trip...")
 stop_times = stop_times.sort_values(["trip_id", "stop_sequence"], kind="stable")
 
-# shift next-stop info inside each trip
 grp = stop_times.groupby("trip_id", sort=False)
 stop_times["next_stop_id"] = grp["stop_id"].shift(-1)
 stop_times["next_arrival_s"] = grp["arrival_s"].shift(-1)
 
-# drop last stop of each trip (no successor) and compute travel time
 pairs = stop_times.dropna(subset=["next_stop_id"]).copy()
 pairs["next_stop_id"] = pairs["next_stop_id"].astype("int64")
 pairs["travel_time_s"] = pairs["next_arrival_s"] - pairs["departure_s"]
 
-# filter implausible values
 pairs = pairs[
     (pairs["travel_time_s"] > 0)
     & (pairs["travel_time_s"] <= MAX_TRAVEL_TIME_S)
 ]
 
-# attach route_id via trips
 pairs = pairs.merge(trips, on="trip_id", how="inner")
 
 print(f"  stop-to-stop hops: {len(pairs)}")
@@ -141,12 +138,11 @@ edges["travel_time_s"] = (
 edges["cost"] = edges["travel_time_s"].astype("float64")
 edges["reverse_cost"] = -1.0
 
-# enrich with route metadata
 edges = edges.merge(routes, on="route_id", how="left")
 
 print(f"  unique edges: {len(edges)}")
 
-# only keep stops actually referenced by edges (drops orphan stops)
+# drop stops that no edge references
 used_stop_ids = pd.Index(
     pd.concat([edges["source"], edges["target"]]).unique()
 )
@@ -175,7 +171,6 @@ coords = stops.set_index("stop_id")[["stop_lon", "stop_lat"]]
 src = coords.reindex(edges["source"].values).reset_index(drop=True)
 dst = coords.reindex(edges["target"].values).reset_index(drop=True)
 
-# drop edges where either endpoint is missing (shouldn't happen, but guard)
 valid = src["stop_lon"].notna() & dst["stop_lon"].notna()
 edges = edges[valid.values].reset_index(drop=True)
 src = src[valid].reset_index(drop=True)
@@ -208,7 +203,7 @@ edges_out = pd.DataFrame(
 edges_out["geom"] = geoms
 edges_gdf = gpd.GeoDataFrame(edges_out, geometry="geom", crs="EPSG:4326")
 
-# length in meters via PL-1992 (EPSG:2180) - metric CRS for Poland
+# PL-1992 (EPSG:2180) is metric and accurate for Poland
 edges_gdf["length_m"] = (
     edges_gdf.to_crs(epsg=2180).length.round(2).astype("float64")
 )
@@ -252,6 +247,39 @@ with engine.begin() as conn:
     conn.execute(text("""
         CREATE INDEX IF NOT EXISTS transit_edges_route_idx
         ON transit_edges(route_id);
+    """))
+
+print(f"Generating walking edges (<= {WALK_RADIUS_M} m, {WALK_SPEED_KMH} km/h)...")
+walk_mps = WALK_SPEED_KMH / 3.6
+with engine.begin() as conn:
+    conn.execute(text(f"""
+        WITH next_id AS (
+            SELECT COALESCE(MAX(id), 0) AS m FROM transit_edges
+        ),
+        pairs AS (
+            SELECT
+                a.id AS source,
+                b.id AS target,
+                ST_Distance(a.geom::geography, b.geom::geography) AS dist_m,
+                ST_MakeLine(a.geom, b.geom) AS geom
+            FROM transit_nodes a
+            JOIN transit_nodes b
+              ON a.id < b.id
+             AND ST_DWithin(a.geom::geography, b.geom::geography, {WALK_RADIUS_M})
+        )
+        INSERT INTO transit_edges
+            (id, source, target, route_id, route_short_name, route_type,
+             trip_count, travel_time_s, cost, reverse_cost, length_m, geom)
+        SELECT
+            (SELECT m FROM next_id) + row_number() OVER (),
+            source, target,
+            NULL, NULL, NULL, NULL,
+            (dist_m / {walk_mps})::int,
+            dist_m / {walk_mps},
+            dist_m / {walk_mps},
+            dist_m,
+            geom
+        FROM pairs;
     """))
 
 print("Done.")
