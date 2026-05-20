@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-from textwrap import dedent
 
 import pandas as pd
+from shapely import wkb
 from sqlalchemy import Engine
 from sqlmodel import text
 
@@ -41,20 +41,66 @@ def calculate_shortest_route_road(source: tuple[float, float], target: tuple[flo
         table_name="road_nodes"
     )
     
-    query = dedent(f"""\
-        SELECT *
-        FROM pgr_Dijkstra(
-            'SELECT id, source, target, cost, reverse_cost FROM road_edges',
-            {source_id}, {target_id},
-            directed => false
-        );
+    sql = text("""
+        WITH route AS (
+            SELECT *
+            FROM pgr_dijkstra(
+                '
+                SELECT
+                    id,
+                    source,
+                    target,
+                    cost,
+                    reverse_cost
+                FROM road_edges
+                ',
+                :start_node,
+                :end_node,
+                directed := true
+            )
+        )
+
+        SELECT
+            r.seq,
+            r.path_seq,
+            r.node,
+            r.edge,
+            r.cost,
+            r.agg_cost,
+            ST_AsBinary(n.geom) AS geom
+        FROM route r
+        JOIN road_nodes n
+            ON r.node = n.id
+        ORDER BY r.path_seq;
     """)
 
-    try:
-        df = pd.read_sql_query(query, engine)
-        print(df)
-    except Exception as e:
-        print(f"Błąd połączenia: {e}")
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {
+            "start_node": source_id,
+            "end_node": target_id
+        }).fetchall()
+
+    if not rows:
+        return {
+            "cost": None,
+            "coordinates": []
+        }
+
+    coordinates = []
+    total_cost = 0.0
+
+    for row in rows:
+        geom = wkb.loads(bytes(row.geom))
+        coordinates.append((
+            geom.x,   # longitude
+            geom.y    # latitude
+        ))
+        total_cost = float(row.agg_cost)
+
+    return {
+        "cost": total_cost,
+        "coordinates": coordinates
+    }
 
 
 def calculate_shortest_route_transit():
@@ -92,3 +138,9 @@ def calculate_shortest_route_pr(source: tuple[float, float], target: tuple[float
                 directed => false
             );
         """
+
+
+print(calculate_shortest_route_road(
+    (21.0281023, 52.3644147),
+    (21.0278057, 52.3625462)
+))
