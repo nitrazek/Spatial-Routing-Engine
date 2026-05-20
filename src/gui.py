@@ -25,7 +25,8 @@ class RoutingApp:
         self.mode_colors = {
             enums.RouteMode.CAR: "#FF0000",
             enums.RouteMode.PUBLIC: "#0000FF",
-            enums.RouteMode.PR: "#FF00FF"
+            enums.RouteMode.PR: "#FF00FF",
+            enums.RouteMode.WALK: "#6495ED"
         }
 
         self._build_controls()
@@ -66,14 +67,20 @@ class RoutingApp:
             color_box = tk.Canvas(row_frame, width=15, height=15, bg=color, highlightthickness=1, highlightbackground="black")
             color_box.pack(side="left", padx=(5, 5))
 
-            var = tk.BooleanVar(value=True if mode == enums.RouteMode.CAR else False)
-            chk = tk.Checkbutton(row_frame, text=mode.value.upper(), variable=var)
-            chk.pack(side="left")
-
-            self.mode_vars[mode] = var
+            if mode == enums.RouteMode.WALK:
+                lbl = tk.Label(row_frame, text=str(mode).upper())
+                lbl.pack(side="left")
+            else:
+                var = tk.BooleanVar(value=True if mode == enums.RouteMode.CAR else False)
+                chk = tk.Checkbutton(row_frame, text=str(mode).upper(), variable=var)
+                chk.pack(side="left")
+                self.mode_vars[mode] = var
 
         btn_calc = tk.Button(self.control_frame, text="Wyznacz trasę", bg="#4CAF50", fg="white", font=("Arial", 12, "bold"), command=self.calculate_and_draw)
         btn_calc.pack(fill="x", pady=(30, 0))
+
+        self.results_frame = tk.Frame(self.control_frame)
+        self.results_frame.pack(fill="x", pady=(20, 0))
 
     def _describe_route(self, nodes: list[tuple[float, float]], description: str, text_color: str = "black"):
         center_node = nodes[len(nodes) // 2]
@@ -97,6 +104,7 @@ class RoutingApp:
         )
 
         self._fit_bounding_box(nodes=route.nodes)
+        return route
 
     def _draw_transit_route(self, source: tuple[float, float], target: tuple[float, float]):
         route = routing.calculate_shortest_route_transit(source=source, target=target)
@@ -108,13 +116,14 @@ class RoutingApp:
             all_nodes.extend(segment.nodes)
             self.map_widget.set_path(
                 position_list=segment.nodes,
-                color=color,
+                color=color if segment.line else self.mode_colors.get(enums.RouteMode.WALK, "#000000"),
                 width=4
             )
             if segment.line:
                 self._describe_route(nodes=segment.nodes, description=segment.line, text_color="darkblue")
 
         self._fit_bounding_box(nodes=all_nodes)
+        return route
 
     def _draw_pr_route(self, source: tuple[float, float], target: tuple[float, float], color: str | None = None):
         route = routing.calculate_shortest_route_pr(source=source, target=target)
@@ -143,6 +152,7 @@ class RoutingApp:
                 self._describe_route(nodes=segment.nodes, description=segment.line, text_color="#4A148C")
 
         self._fit_bounding_box(nodes=all_nodes)
+        return route
 
     def _fit_bounding_box(self, nodes: list[tuple[float, float]]):
         min_lat = min(node[0] for node in nodes)
@@ -171,6 +181,11 @@ class RoutingApp:
         self.map_widget.set_marker(source[1], source[0], text="START", marker_color_circle="green", marker_color_outside="darkgreen")
         self.map_widget.set_marker(target[1], target[0], text="CEL", marker_color_circle="red", marker_color_outside="darkred")
 
+        for widget in self.results_frame.winfo_children():
+            widget.destroy()
+            
+        tk.Label(self.results_frame, text="Podsumowanie tras:", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
+
         draw_route_fn_map = {
             enums.RouteMode.CAR: self._draw_road_route,
             enums.RouteMode.PUBLIC: self._draw_transit_route,
@@ -178,7 +193,15 @@ class RoutingApp:
         }
 
         for mode in selected_modes:
-            draw_route_fn_map[mode](source=source, target=target)
+            route = draw_route_fn_map[mode](source=source, target=target)
+
+            row_frame = tk.Frame(self.results_frame)
+            row_frame.pack(fill="x", pady=5)
+            
+            color = self.mode_colors.get(mode, "#000000")
+            tk.Canvas(row_frame, width=15, height=15, bg=color, highlightthickness=1, highlightbackground="black").pack(side="left", padx=(0, 10))
+            tk.Label(row_frame, text=str(mode).upper(), font=("Arial", 10)).pack(side="left")
+            tk.Label(row_frame, text=f"{round(route.cost / 60)} min", font=("Arial", 10, "bold")).pack(side="right")
 
 
 if __name__ == "__main__":
