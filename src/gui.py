@@ -26,7 +26,8 @@ class RoutingApp:
             enums.RouteMode.CAR: "#FF0000",
             enums.RouteMode.PUBLIC: "#0000FF",
             enums.RouteMode.PR: "#FF00FF",
-            enums.RouteMode.WALK: "#6495ED"
+            enums.RouteMode.WALK_PUBLIC: "#6495ED",
+            enums.RouteMode.WALK_PR: "#FFC0CB"
         }
 
         self._build_controls()
@@ -67,7 +68,7 @@ class RoutingApp:
             color_box = tk.Canvas(row_frame, width=15, height=15, bg=color, highlightthickness=1, highlightbackground="black")
             color_box.pack(side="left", padx=(5, 5))
 
-            if mode == enums.RouteMode.WALK:
+            if mode in [enums.RouteMode.WALK_PUBLIC, enums.RouteMode.WALK_PR]:
                 lbl = tk.Label(row_frame, text=str(mode).upper())
                 lbl.pack(side="left")
             else:
@@ -116,7 +117,7 @@ class RoutingApp:
             all_nodes.extend(segment.nodes)
             self.map_widget.set_path(
                 position_list=segment.nodes,
-                color=color if segment.line else self.mode_colors.get(enums.RouteMode.WALK, "#000000"),
+                color=color if segment.line else self.mode_colors.get(enums.RouteMode.WALK_PUBLIC, "#000000"),
                 width=4
             )
             if segment.line:
@@ -145,7 +146,7 @@ class RoutingApp:
             all_nodes.extend(segment.nodes)
             self.map_widget.set_path(
                 position_list=segment.nodes,
-                color=color,
+                color=color if segment.line else self.mode_colors.get(enums.RouteMode.WALK_PR, "#000000"),
                 width=4
             )
             if segment.line:

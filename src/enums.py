@@ -5,7 +5,8 @@ class RouteMode(StrEnum):
     CAR = "CAR"
     PUBLIC = "PUBLIC"
     PR = "PR"
-    WALK = "WALK"
+    WALK_PUBLIC = "WALK_PUBLIC"
+    WALK_PR = "WALK_PR"
 
 
 class NodeType(StrEnum):
