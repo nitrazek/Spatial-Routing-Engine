@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import messagebox
 import tkintermapview
 
-from src import enums
+from src import enums, routing
 
 
 class RoutingApp:
@@ -88,12 +88,15 @@ class RoutingApp:
         self.map_widget.set_marker(source[0], source[1], text="START", marker_color_circle="green", marker_color_outside="darkgreen")
         self.map_widget.set_marker(target[0], target[1], text="CEL", marker_color_circle="red", marker_color_outside="darkred")
 
+        routing_fn_map = {
+            enums.RouteMode.CAR: routing.calculate_shortest_route_road,
+            enums.RouteMode.PUBLIC: routing.calculate_shortest_route_transit,
+            enums.RouteMode.PR: routing.calculate_shortest_route_pr,
+        }
+
         for mode in selected_modes:
             # --- MOCK DANYCH (Twój kod testowy) ---
-            nodes = [
-                source,
-                target
-            ]
+            nodes, cost = routing_fn_map[mode]()
             
             color = self.mode_colors.get(mode, "#000000")
             self.map_widget.set_path(
