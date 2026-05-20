@@ -1,6 +1,5 @@
 import math
 from dataclasses import dataclass, field
-from itertools import groupby
 from textwrap import dedent
 
 import pandas as pd
@@ -157,7 +156,7 @@ def calculate_shortest_route_transit(source: tuple[float, float], target: tuple[
     query = dedent(f"""\
         SELECT p.seq, p.cost AS edge_cost, p.agg_cost,
                n.x AS lon, n.y AS lat,
-               e.route_short_name AS line
+               e.lines AS lines
         FROM pgr_Dijkstra(
             'SELECT id, source, target, cost, reverse_cost FROM transit_edges',
             {source_id}, {target_id},
@@ -174,15 +173,53 @@ def calculate_shortest_route_transit(source: tuple[float, float], target: tuple[
 
     rows = list(df.itertuples(index=False))
 
+    def edge_lines(value) -> set[str] | None:
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return None
+        return set(value.split(","))
+
     segments: list[TransitSegment] = []
+    seg_lines: set[str] | None = None
+    seg_first_idx = 0
+    seg_cost = 0.0
+
     edges = list(zip(rows, rows[1:]))
-    for line, group in groupby(edges, key=lambda fr_to: fr_to[0].line):
-        if type(line) is not str and math.isnan(line):
-            line = None
-        group = list(group)
-        nodes = [(group[0][0].lon, group[0][0].lat)] + [(t.lon, t.lat) for _, t in group]
-        cost = sum(float(f.edge_cost) for f, _ in group)
-        segments.append(TransitSegment(line=line, nodes=nodes, cost=cost))
+
+    def finalize(end_idx: int) -> None:
+        if end_idx <= seg_first_idx:
+            return
+        nodes = [(rows[seg_first_idx].lon, rows[seg_first_idx].lat)]
+        nodes += [(rows[i + 1].lon, rows[i + 1].lat) for i in range(seg_first_idx, end_idx)]
+        line = next(iter(seg_lines)) if seg_lines else None
+        segments.append(TransitSegment(line=line, nodes=nodes, cost=seg_cost))
+
+    for i, (f, _t) in enumerate(edges):
+        el = edge_lines(f.lines)
+        if i == 0:
+            seg_lines = el
+            seg_cost = float(f.edge_cost)
+            continue
+
+        same_kind = (el is None) == (seg_lines is None)
+        keep = False
+        if same_kind:
+            if el is None:
+                keep = True
+            else:
+                inter = seg_lines & el
+                if inter:
+                    seg_lines = inter
+                    keep = True
+
+        if keep:
+            seg_cost += float(f.edge_cost)
+        else:
+            finalize(i)
+            seg_first_idx = i
+            seg_lines = el
+            seg_cost = float(f.edge_cost)
+
+    finalize(len(edges))
 
     return TransitRoute(segments=segments, cost=float(df["agg_cost"].iloc[-1]))
 

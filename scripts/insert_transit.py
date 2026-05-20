@@ -1,16 +1,20 @@
 """
 Loads GTFS data from data/public_transport into PostGIS in a pgRouting-ready
-shape, mirroring the road_nodes / road_edges layout used by insert_database.py.
+shape, mirroring the road_nodes / road_edges layout used by insert_streets.py.
 
 Produced tables:
     transit_nodes(id, stop_code, name, x, y, geom)
-    transit_edges(id, source, target, route_id, route_short_name, route_type,
-                  trip_count, travel_time_s, cost, reverse_cost, length_m, geom)
+    transit_edges(id, source, target, lines, trip_count, travel_time_s,
+                  cost, reverse_cost, length_m, geom)
 
-Edges are deduplicated per (source, target, route_id) so a separate edge exists
-for every line running between two adjacent stops. cost = avg travel time in
-seconds; reverse_cost = -1 because GTFS trips are inherently directional.
+Parallel lines on the same hop are merged into a single edge: `lines` holds
+the comma-separated set of route_short_name values that serve this hop, and
+cost = min(travel_time_s) over those lines. The actual line per segment is
+chosen post-routing by intersecting line sets along the path. Walking edges
+have lines = NULL.
 """
+
+import re
 
 import pandas as pd
 import geopandas as gpd
@@ -31,6 +35,8 @@ MAX_TRAVEL_TIME_S = 60 * 60 * 3
 
 WALK_SPEED_KMH = 5
 WALK_RADIUS_M = 200
+
+EXCLUDED_LINE_REGEX = re.compile(r"^(N\d+|[A-Za-z])$")
 
 
 def parse_gtfs_time(series: pd.Series) -> pd.Series:
@@ -65,11 +71,20 @@ routes = pd.read_csv(
 )
 print(f"  routes: {len(routes)}")
 
+excluded_mask = routes["route_short_name"].str.match(
+    EXCLUDED_LINE_REGEX, na=False
+)
+print(f"  excluding {excluded_mask.sum()} lines (night/lettered)")
+routes = routes[~excluded_mask].reset_index(drop=True)
+
 print("Reading trips...")
 trips = pd.read_csv(
     GTFS_DIR / "trips.txt",
     dtype={"route_id": "string", "trip_id": "string"},
     usecols=["route_id", "trip_id"],
+)
+trips = trips.merge(
+    routes[["route_id", "route_short_name"]], on="route_id", how="inner",
 )
 print(f"  trips: {len(trips)}")
 
@@ -118,16 +133,33 @@ pairs = pairs.merge(trips, on="trip_id", how="inner")
 
 print(f"  stop-to-stop hops: {len(pairs)}")
 
-print("Aggregating edges per (source, target, route_id)...")
-edges = (
+print("Aggregating per (source, target, line)...")
+per_line = (
     pairs.groupby(
-        ["stop_id", "next_stop_id", "route_id"],
+        ["stop_id", "next_stop_id", "route_short_name"],
         sort=False,
         as_index=False,
     )
     .agg(
         trip_count=("trip_id", "count"),
         travel_time_s=("travel_time_s", "mean"),
+    )
+)
+
+print("Merging parallel lines per (source, target)...")
+edges = (
+    per_line.groupby(
+        ["stop_id", "next_stop_id"],
+        sort=False,
+        as_index=False,
+    )
+    .agg(
+        travel_time_s=("travel_time_s", "min"),
+        trip_count=("trip_count", "sum"),
+        lines=(
+            "route_short_name",
+            lambda s: ",".join(sorted(set(s.dropna()))),
+        ),
     )
     .rename(columns={"stop_id": "source", "next_stop_id": "target"})
 )
@@ -138,11 +170,8 @@ edges["travel_time_s"] = (
 edges["cost"] = edges["travel_time_s"].astype("float64")
 edges["reverse_cost"] = -1.0
 
-edges = edges.merge(routes, on="route_id", how="left")
-
 print(f"  unique edges: {len(edges)}")
 
-# drop stops that no edge references
 used_stop_ids = pd.Index(
     pd.concat([edges["source"], edges["target"]]).unique()
 )
@@ -191,9 +220,7 @@ edges_out = pd.DataFrame(
         "id": range(1, len(edges) + 1),
         "source": edges["source"].astype("int64").values,
         "target": edges["target"].astype("int64").values,
-        "route_id": edges["route_id"].values,
-        "route_short_name": edges["route_short_name"].values,
-        "route_type": edges["route_type"].astype("int16").values,
+        "lines": edges["lines"].values,
         "trip_count": edges["trip_count"].astype("int32").values,
         "travel_time_s": edges["travel_time_s"].values,
         "cost": edges["cost"].values,
@@ -204,8 +231,7 @@ edges_out["geom"] = geoms
 edges_gdf = gpd.GeoDataFrame(edges_out, geometry="geom", crs="EPSG:4326")
 
 # PL-1992 (EPSG:2180) is metric and accurate for Poland
-edges_gdf["length_m"] = (
-    edges_gdf.to_crs(epsg=2180).length.round(2).astype("float64")
+edges_gdf["length_m"] = (    edges_gdf.to_crs(epsg=2180).length.round(2).astype("float64")
 )
 
 print("Saving transit_nodes...")
@@ -244,10 +270,6 @@ with engine.begin() as conn:
         CREATE INDEX IF NOT EXISTS transit_edges_target_idx
         ON transit_edges(target);
     """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS transit_edges_route_idx
-        ON transit_edges(route_id);
-    """))
 
 print(f"Generating walking edges (<= {WALK_RADIUS_M} m, {WALK_SPEED_KMH} km/h)...")
 walk_mps = WALK_SPEED_KMH / 3.6
@@ -268,12 +290,12 @@ with engine.begin() as conn:
              AND ST_DWithin(a.geom::geography, b.geom::geography, {WALK_RADIUS_M})
         )
         INSERT INTO transit_edges
-            (id, source, target, route_id, route_short_name, route_type,
-             trip_count, travel_time_s, cost, reverse_cost, length_m, geom)
+            (id, source, target, lines, trip_count, travel_time_s,
+             cost, reverse_cost, length_m, geom)
         SELECT
             (SELECT m FROM next_id) + row_number() OVER (),
             source, target,
-            NULL, NULL, NULL, NULL,
+            NULL, NULL,
             (dist_m / {walk_mps})::int,
             dist_m / {walk_mps},
             dist_m / {walk_mps},
