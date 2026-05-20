@@ -93,7 +93,6 @@ class RoutingApp:
         )
         self.map_widget.set_marker(shortest_route.pr_node[0], shortest_route.pr_node[1], text="PR", marker_color_circle="darkgray", marker_color_outside="black")
 
-
     def calculate_and_draw(self):
         """Pobiera dane, wywołuje 'algorytm' i rysuje trasę na mapie."""
         try:

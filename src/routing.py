@@ -127,7 +127,10 @@ def calculate_shortest_route_road(source: tuple[float, float], target: tuple[flo
         ))
         total_cost = float(row.agg_cost)
 
-    return Route(nodes=coordinates, cost=total_cost)
+    return Route(
+        nodes=coordinates,
+        cost=total_cost
+    )
 
 
 def calculate_shortest_route_transit(source: tuple[float, float], target: tuple[float, float]) -> TransitRoute | None:
