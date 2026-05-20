@@ -68,7 +68,7 @@ class RoutingApp:
         btn_calc = tk.Button(self.control_frame, text="Wyznacz trasę", bg="#4CAF50", fg="white", font=("Arial", 12, "bold"), command=self.calculate_and_draw)
         btn_calc.pack(fill="x", pady=(30, 0))
 
-    def _draw_road_route(self, shortest_route: routing.ShortestRoute):
+    def _draw_road_route(self, shortest_route: routing.Route):
         color = self.mode_colors.get(enums.RouteMode.CAR, "#000000")
         self.map_widget.set_path(
             position_list=shortest_route.nodes,
@@ -76,7 +76,7 @@ class RoutingApp:
             width=4
         )
 
-    def _draw_transit_route(self, shortest_route: routing.ShortestRoute):
+    def _draw_transit_route(self, shortest_route: routing.TransitRoute):
         color = self.mode_colors.get(enums.RouteMode.PUBLIC, "#000000")
         self.map_widget.set_path(
             position_list=shortest_route.nodes,
@@ -84,7 +84,7 @@ class RoutingApp:
             width=4
         )
 
-    def _draw_pr_route(self, shortest_route: routing.PrShortestRoute):
+    def _draw_pr_route(self, shortest_route: routing.PrRoute):
         color = self.mode_colors.get(enums.RouteMode.PR, "#000000")
         self.map_widget.set_path(
             position_list=shortest_route.nodes,
@@ -121,7 +121,8 @@ class RoutingApp:
         }
 
         for mode in selected_modes:
-            shortest_route: routing.ShortestRoute = fn_map[mode]["route"](source=source, target=target)
+            shortest_route: routing.Route = fn_map[mode]["route"](source=source, target=target)
+            print(shortest_route)
             fn_map[mode]["draw"](shortest_route=shortest_route)
 
         min_lat = min(node[0] for node in shortest_route.nodes)
