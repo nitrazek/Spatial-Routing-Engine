@@ -1,6 +1,5 @@
 import geopandas as gpd
 from sqlalchemy import text
-from pathlib import Path
 
 from scripts import DATA_DIR
 from src.database import DatabaseManager
@@ -12,10 +11,10 @@ DatabaseManager.create_db_and_tables()
 GEOJSON_FILE = DATA_DIR / "pr" / "parkingi_pr.geojson"
 
 if GEOJSON_FILE.is_file():
-    print(f"Wczytywanie danych z pliku: {GEOJSON_FILE}")
+    print(f"Loading data from file: {GEOJSON_FILE}")
     gdf = gpd.read_file(GEOJSON_FILE)
 else:
-    raise FileNotFoundError(f"Nie znaleziono pliku: {GEOJSON_FILE}")
+    raise FileNotFoundError(f"File not found: {GEOJSON_FILE}")
 
 print(f"Wczytano obiektów: {len(gdf)}")
 
@@ -41,22 +40,50 @@ gdf_out = gdf[base_cols].copy()
 
 gdf_out = gdf_out.loc[:, ~gdf_out.columns.duplicated()]
 
-print("Zapisywanie danych do bazy danych (tabela: parkingi_pr)...")
+print("Saving files to database... (table: pr_nodes)...")
 
 gdf_out.to_postgis(
-    "pr_nodes",
+    "pr_nodes_tmp",
     engine,
     if_exists="replace",
     index=False
 )
 
-print("Tworzenie indeksów...")
-
 with engine.begin() as conn:
+    conn.execute(text("DROP TABLE IF EXISTS pr_nodes;"))
     conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS parkingi_pr_geom_idx
+        CREATE TABLE pr_nodes AS
+        SELECT 
+            p.*,
+            (
+                SELECT id FROM road_nodes r 
+                ORDER BY r.geom <-> p.geom 
+                LIMIT 1
+            ) AS road_node,
+            (
+                SELECT id FROM transit_nodes t 
+                ORDER BY t.geom <-> p.geom 
+                LIMIT 1
+            ) AS transit_node
+        FROM pr_nodes_tmp p;
+    """))
+
+    conn.execute(text("DROP TABLE pr_nodes_tmp;"))
+
+    print("Creating indexes...")
+
+    conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS pr_nodes_geom_idx
         ON pr_nodes
         USING GIST (geom);
     """))
+    conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS pr_nodes_road_node_idx
+        ON pr_nodes(road_node);
+    """))
+    conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS pr_nodes_transit_node_idx
+        ON pr_nodes(transit_node);
+    """))
 
-print("Zakończono pomyślnie!")
+print("Inserted successfully!")
