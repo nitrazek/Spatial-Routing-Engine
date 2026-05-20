@@ -22,6 +22,7 @@ from src.database import DatabaseManager
 
 
 engine = DatabaseManager.engine
+DatabaseManager.create_db_and_tables()
 
 GTFS_DIR = DATA_DIR / "public_transport"
 

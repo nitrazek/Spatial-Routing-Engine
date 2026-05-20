@@ -9,6 +9,7 @@ from src.database import DatabaseManager
 
 
 engine = DatabaseManager.engine
+DatabaseManager.create_db_and_tables()
 
 PLACE = "Warsaw, Poland"
 
