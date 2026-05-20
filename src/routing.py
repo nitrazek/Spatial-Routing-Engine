@@ -195,7 +195,7 @@ def calculate_shortest_route_pr(source: tuple[float, float], target: tuple[float
         """
 
 
-print(calculate_shortest_route_road(
-    (21.0281023, 52.3644147),
-    (21.0278057, 52.3625462)
-))
+# print(calculate_shortest_route_road(
+#     (21.0281023, 52.3644147),
+#     (21.0278057, 52.3625462)
+# ))
