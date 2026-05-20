@@ -34,27 +34,27 @@ class RoutingApp:
         """Buduje formularz w lewym panelu."""
         tk.Label(self.control_frame, text="Współrzędne Startowe", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 5))
         
-        tk.Label(self.control_frame, text="Szerokość (Lat):").pack(anchor="w")
-        self.entry_source_lat = tk.Entry(self.control_frame)
-        self.entry_source_lat.pack(fill="x", pady=(0, 5))
-        self.entry_source_lat.insert(0, "52.1672")
-
         tk.Label(self.control_frame, text="Długość (Lon):").pack(anchor="w")
         self.entry_source_lon = tk.Entry(self.control_frame)
         self.entry_source_lon.pack(fill="x", pady=(0, 15))
         self.entry_source_lon.insert(0, "20.9679")
 
+        tk.Label(self.control_frame, text="Szerokość (Lat):").pack(anchor="w")
+        self.entry_source_lat = tk.Entry(self.control_frame)
+        self.entry_source_lat.pack(fill="x", pady=(0, 5))
+        self.entry_source_lat.insert(0, "52.1672")
+
         tk.Label(self.control_frame, text="Współrzędne Celu", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 5))
         
-        tk.Label(self.control_frame, text="Szerokość (Lat):").pack(anchor="w")
-        self.entry_target_lat = tk.Entry(self.control_frame)
-        self.entry_target_lat.pack(fill="x", pady=(0, 5))
-        self.entry_target_lat.insert(0, "52.2478")
-
         tk.Label(self.control_frame, text="Długość (Lon):").pack(anchor="w")
         self.entry_target_lon = tk.Entry(self.control_frame)
         self.entry_target_lon.pack(fill="x", pady=(0, 15))
         self.entry_target_lon.insert(0, "21.0144")
+
+        tk.Label(self.control_frame, text="Szerokość (Lat):").pack(anchor="w")
+        self.entry_target_lat = tk.Entry(self.control_frame)
+        self.entry_target_lat.pack(fill="x", pady=(0, 5))
+        self.entry_target_lat.insert(0, "52.2478")
 
         tk.Label(self.control_frame, text="Tryb transportu", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 5))
         
@@ -68,36 +68,68 @@ class RoutingApp:
         btn_calc = tk.Button(self.control_frame, text="Wyznacz trasę", bg="#4CAF50", fg="white", font=("Arial", 12, "bold"), command=self.calculate_and_draw)
         btn_calc.pack(fill="x", pady=(30, 0))
 
-    def _draw_road_route(self, shortest_route: routing.Route):
+    def _draw_road_route(self, source: tuple[float, float], target: tuple[float, float]):
+        route = routing.calculate_shortest_route_road(source=source, target=target)
         color = self.mode_colors.get(enums.RouteMode.CAR, "#000000")
+        route.nodes = [(y, x) for x, y in route.nodes]
         self.map_widget.set_path(
-            position_list=shortest_route.nodes,
+            position_list=route.nodes,
             color=color,
             width=4
         )
 
-    def _draw_transit_route(self, shortest_route: routing.TransitRoute):
+        self._fit_bounding_box(nodes=route.nodes)
+
+    def _draw_transit_route(self, source: tuple[float, float], target: tuple[float, float]):
+        route = routing.calculate_shortest_route_transit(source=source, target=target)
         color = self.mode_colors.get(enums.RouteMode.PUBLIC, "#000000")
-        self.map_widget.set_path(
-            position_list=shortest_route.nodes,
-            color=color,
-            width=4
-        )
+        all_nodes = []
+        for segment in route.segments:
+            segment.nodes = [(y, x) for x, y in segment.nodes]
+            all_nodes.extend(segment.nodes)
+            self.map_widget.set_path(
+                position_list=segment.nodes,
+                color=color,
+                width=4
+            )
 
-    def _draw_pr_route(self, shortest_route: routing.PrRoute):
+        self._fit_bounding_box(nodes=all_nodes)
+
+    def _draw_pr_route(self, source: tuple[float, float], target: tuple[float, float]):
+        route = routing.calculate_shortest_route_pr(source=source, target=target)
         color = self.mode_colors.get(enums.RouteMode.PR, "#000000")
+        all_nodes = []
+        route.road_route.nodes = [(y, x) for x, y in route.road_route.nodes]
+        all_nodes.extend(route.road_route.nodes)
         self.map_widget.set_path(
-            position_list=shortest_route.nodes,
+            position_list=route.road_route.nodes,
             color=color,
             width=4
         )
-        self.map_widget.set_marker(shortest_route.pr_node[0], shortest_route.pr_node[1], text="PR", marker_color_circle="darkgray", marker_color_outside="black")
+        self.map_widget.set_marker(route.pr_node[1], route.pr_node[0], text="PR", marker_color_circle="darkgray", marker_color_outside="black")
+        for segment in route.transit_route.segments:
+            segment.nodes = [(y, x) for x, y in segment.nodes]
+            all_nodes.extend(segment.nodes)
+            self.map_widget.set_path(
+                position_list=segment.nodes,
+                color=color,
+                width=4
+            )
+        
+        self._fit_bounding_box(nodes=all_nodes)
+
+    def _fit_bounding_box(self, nodes: list[tuple[float, float]]):
+        min_lat = min(node[0] for node in nodes)
+        max_lat = max(node[0] for node in nodes)
+        min_lon = min(node[1] for node in nodes)
+        max_lon = max(node[1] for node in nodes)
+        self.map_widget.fit_bounding_box((max_lat, min_lon), (min_lat, max_lon))
 
     def calculate_and_draw(self):
         """Pobiera dane, wywołuje 'algorytm' i rysuje trasę na mapie."""
         try:
-            source = (float(self.entry_source_lat.get()), float(self.entry_source_lon.get()))
-            target = (float(self.entry_target_lat.get()), float(self.entry_target_lon.get()))
+            source = (float(self.entry_source_lon.get()), float(self.entry_source_lat.get()))
+            target = (float(self.entry_target_lon.get()), float(self.entry_target_lat.get()))
         except ValueError:
             messagebox.showerror("Błąd danych", "Współrzędne muszą być liczbami zmiennoprzecinkowymi!")
             return
@@ -110,25 +142,18 @@ class RoutingApp:
         self.map_widget.delete_all_path()
         self.map_widget.delete_all_marker()
 
-        self.map_widget.set_marker(source[0], source[1], text="START", marker_color_circle="green", marker_color_outside="darkgreen")
-        self.map_widget.set_marker(target[0], target[1], text="CEL", marker_color_circle="red", marker_color_outside="darkred")
+        self.map_widget.set_marker(source[1], source[0], text="START", marker_color_circle="green", marker_color_outside="darkgreen")
+        self.map_widget.set_marker(target[1], target[0], text="CEL", marker_color_circle="red", marker_color_outside="darkred")
 
-        fn_map = {
-            enums.RouteMode.CAR: {"route": routing.calculate_shortest_route_road, "draw": self._draw_road_route},
-            enums.RouteMode.PUBLIC: {"route": routing.calculate_shortest_route_transit, "draw": self._draw_transit_route},
-            enums.RouteMode.PR: {"route": routing.calculate_shortest_route_pr, "draw": self._draw_pr_route},
+        draw_route_fn_map = {
+            enums.RouteMode.CAR: self._draw_road_route,
+            enums.RouteMode.PUBLIC: self._draw_transit_route,
+            enums.RouteMode.PR: self._draw_pr_route
         }
 
         for mode in selected_modes:
-            shortest_route: routing.Route = fn_map[mode]["route"](source=source, target=target)
-            print(shortest_route)
-            fn_map[mode]["draw"](shortest_route=shortest_route)
+            draw_route_fn_map[mode](source=source, target=target)
 
-        min_lat = min(node[0] for node in shortest_route.nodes)
-        max_lat = max(node[0] for node in shortest_route.nodes)
-        min_lon = min(node[1] for node in shortest_route.nodes)
-        max_lon = max(node[1] for node in shortest_route.nodes)
-        self.map_widget.fit_bounding_box((max_lat, min_lon), (min_lat, max_lon))
 
 if __name__ == "__main__":
     root = tk.Tk()

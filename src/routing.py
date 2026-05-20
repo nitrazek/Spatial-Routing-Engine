@@ -13,12 +13,12 @@ from src import database
 @dataclass
 class Route:
     nodes: list[tuple[float, float]]
-    cost: float
+    cost: float = 0.0
 
 
 @dataclass
 class TransitSegment(Route):
-    line: str | None
+    line: str | None = None
 
 
 @dataclass
@@ -28,8 +28,11 @@ class TransitRoute:
 
 
 @dataclass
-class PrRoute(Route):
+class PrRoute:
+    road_route: Route
+    transit_route: TransitRoute
     pr_node: tuple[float, float]
+    cost: float = 0.0
 
 
 def get_nearest_node(x: float, y: float, engine: Engine, nodes_table_name: str) -> int:
@@ -140,14 +143,14 @@ def calculate_shortest_route_transit(source: tuple[float, float], target: tuple[
         x=source[0],
         y=source[1],
         engine=engine,
-        table_name="transit_nodes"
+        nodes_table_name="transit_nodes"
     )
 
     target_id = get_nearest_node(
         x=target[0],
         y=target[1],
         engine=engine,
-        table_name="transit_nodes"
+        nodes_table_name="transit_nodes"
     )
 
     query = dedent(f"""\
@@ -174,57 +177,46 @@ def calculate_shortest_route_transit(source: tuple[float, float], target: tuple[
     edges = list(zip(rows, rows[1:]))
     for line, group in groupby(edges, key=lambda fr_to: fr_to[0].line):
         group = list(group)
-        nodes = [(group[0][0].lat, group[0][0].lon)] + [(t.lat, t.lon) for _, t in group]
+        nodes = [(group[0][0].lon, group[0][0].lat)] + [(t.lon, t.lat) for _, t in group]
         cost = sum(float(f.edge_cost) for f, _ in group)
         segments.append(TransitSegment(line=line, nodes=nodes, cost=cost))
 
     return TransitRoute(segments=segments, cost=float(df["agg_cost"].iloc[-1]))
 
 
-def calculate_shortest_route_pr(source: tuple[float, float], target: tuple[float, float]) -> Route:
+def calculate_shortest_route_pr(source: tuple[float, float], target: tuple[float, float]) -> PrRoute:
     engine = database.DatabaseManager.engine
 
-    source_id = get_nearest_node(
-        x=source[1],
-        y=source[0],
-        engine=engine,
-        nodes_table_name="road_nodes"
-    )
-    target_id = get_nearest_node(
-        x=target[1],
-        y=target[0],
-        engine=engine,
-        nodes_table_name="transit_nodes"
-    )
-
     pr_nodes = pd.read_sql_query("""
-        SELECT id, x, y, road_node, transit_node 
-        FROM pr_nodes;
+        SELECT
+            p.id,
+            p.x,
+            p.y,
+            r.x as road_node_x,
+            r.y as road_node_y,
+            t.x as transit_node_x,
+            t.y as transit_node_y 
+        FROM pr_nodes p
+        JOIN road_nodes r ON p.road_node = r.id
+        JOIN transit_nodes t ON p.transit_node = t.id;
     """, engine)
-    print(pr_nodes)
 
     routes: list[Route] = []
     for _, pr in pr_nodes.iterrows():
-        road_route_df = run_dijkstra(
-            source=source_id,
-            target=pr['road_node'],
-            engine=engine,
-            edges_table_name="road_edges",
-            nodes_table_name="road_nodes"
+        road_route = calculate_shortest_route_road(
+            source=source,
+            target=(pr['road_node_x'], pr['road_node_y'])
         )
-        transit_route_df = run_dijkstra(
-            source=pr['transit_node'],
-            target=target_id,
-            engine=engine,
-            edges_table_name="transit_edges",
-            nodes_table_name="transit_nodes"
+        transit_route = calculate_shortest_route_transit(
+            source=(pr['transit_node_x'], pr['transit_node_y']),
+            target=target
         )
 
-        if road_route_df.empty or transit_route_df.empty:
-            continue
-
-        nodes = list(zip(road_route_df['y'], road_route_df['x'])) + list(zip(transit_route_df['y'], transit_route_df['x']))
-        cost = road_route_df['agg_cost'].iloc[-1] + transit_route_df['agg_cost'].iloc[-1]
-        routes.append(PrRoute(nodes=nodes, cost=cost, pr_node=(pr['y'], pr['x'])))
+        routes.append(PrRoute(
+            road_route=road_route,
+            transit_route=transit_route,
+            pr_node=(pr['x'], pr['y']),
+            cost=road_route.cost+transit_route.cost
+        ))
 
     return min(routes, key=lambda x: x.cost)
