@@ -111,10 +111,10 @@ def calculate_shortest_route_road(source: tuple[float, float], target: tuple[flo
         }).fetchall()
 
     if not rows:
-        return {
-            "cost": None,
-            "coordinates": []
-        }
+        return Route(
+            nodes=[],
+            cost=None
+        )
 
     coordinates = []
     total_cost = 0.0
