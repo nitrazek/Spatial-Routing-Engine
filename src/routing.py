@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass, field
 from itertools import groupby
 from textwrap import dedent
@@ -176,6 +177,8 @@ def calculate_shortest_route_transit(source: tuple[float, float], target: tuple[
     segments: list[TransitSegment] = []
     edges = list(zip(rows, rows[1:]))
     for line, group in groupby(edges, key=lambda fr_to: fr_to[0].line):
+        if type(line) is not str and math.isnan(line):
+            line = None
         group = list(group)
         nodes = [(group[0][0].lon, group[0][0].lat)] + [(t.lon, t.lat) for _, t in group]
         cost = sum(float(f.edge_cost) for f, _ in group)

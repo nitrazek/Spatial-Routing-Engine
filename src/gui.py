@@ -1,6 +1,6 @@
 import tkinter as tk
-from tkinter import messagebox
 import tkintermapview
+from tkinter import messagebox
 
 from src import enums, routing
 
@@ -22,13 +22,13 @@ class RoutingApp:
         self.map_widget.set_position(52.2297, 21.0122)
         self.map_widget.set_zoom(11)
 
-        self._build_controls()
-
         self.mode_colors = {
             enums.RouteMode.CAR: "#FF0000",
             enums.RouteMode.PUBLIC: "#0000FF",
             enums.RouteMode.PR: "#FF00FF"
         }
+
+        self._build_controls()
 
     def _build_controls(self):
         """Buduje formularz w lewym panelu."""
@@ -60,17 +60,35 @@ class RoutingApp:
         
         self.mode_vars = {}
         for mode in enums.RouteMode:
+            row_frame = tk.Frame(self.control_frame)
+            row_frame.pack(anchor="w", pady=2)
+            color = self.mode_colors.get(mode, "#000000")
+            color_box = tk.Canvas(row_frame, width=15, height=15, bg=color, highlightthickness=1, highlightbackground="black")
+            color_box.pack(side="left", padx=(5, 5))
+
             var = tk.BooleanVar(value=True if mode == enums.RouteMode.CAR else False)
-            chk = tk.Checkbutton(self.control_frame, text=mode.value.upper(), variable=var)
-            chk.pack(anchor="w")
+            chk = tk.Checkbutton(row_frame, text=mode.value.upper(), variable=var)
+            chk.pack(side="left")
+
             self.mode_vars[mode] = var
 
         btn_calc = tk.Button(self.control_frame, text="Wyznacz trasę", bg="#4CAF50", fg="white", font=("Arial", 12, "bold"), command=self.calculate_and_draw)
         btn_calc.pack(fill="x", pady=(30, 0))
 
+    def _describe_route(self, nodes: list[tuple[float, float]], description: str, text_color: str = "black"):
+        center_node = nodes[len(nodes) // 2]
+        self.map_widget.set_marker(
+            center_node[0],
+            center_node[1],
+            text=description,
+            icon=tk.PhotoImage(width=1, height=1),
+            text_color=text_color
+        )
+
     def _draw_road_route(self, source: tuple[float, float], target: tuple[float, float]):
         route = routing.calculate_shortest_route_road(source=source, target=target)
         color = self.mode_colors.get(enums.RouteMode.CAR, "#000000")
+        
         route.nodes = [(y, x) for x, y in route.nodes]
         self.map_widget.set_path(
             position_list=route.nodes,
@@ -84,6 +102,7 @@ class RoutingApp:
         route = routing.calculate_shortest_route_transit(source=source, target=target)
         color = self.mode_colors.get(enums.RouteMode.PUBLIC, "#000000")
         all_nodes = []
+
         for segment in route.segments:
             segment.nodes = [(y, x) for x, y in segment.nodes]
             all_nodes.extend(segment.nodes)
@@ -92,13 +111,16 @@ class RoutingApp:
                 color=color,
                 width=4
             )
+            if segment.line:
+                self._describe_route(nodes=segment.nodes, description=segment.line, text_color="darkblue")
 
         self._fit_bounding_box(nodes=all_nodes)
 
-    def _draw_pr_route(self, source: tuple[float, float], target: tuple[float, float]):
+    def _draw_pr_route(self, source: tuple[float, float], target: tuple[float, float], color: str | None = None):
         route = routing.calculate_shortest_route_pr(source=source, target=target)
         color = self.mode_colors.get(enums.RouteMode.PR, "#000000")
         all_nodes = []
+
         route.road_route.nodes = [(y, x) for x, y in route.road_route.nodes]
         all_nodes.extend(route.road_route.nodes)
         self.map_widget.set_path(
@@ -106,7 +128,9 @@ class RoutingApp:
             color=color,
             width=4
         )
-        self.map_widget.set_marker(route.pr_node[1], route.pr_node[0], text="PR", marker_color_circle="darkgray", marker_color_outside="black")
+
+        self.map_widget.set_marker(route.pr_node[1], route.pr_node[0], text="PARKING", marker_color_circle="darkgray", marker_color_outside="black")
+
         for segment in route.transit_route.segments:
             segment.nodes = [(y, x) for x, y in segment.nodes]
             all_nodes.extend(segment.nodes)
@@ -115,7 +139,9 @@ class RoutingApp:
                 color=color,
                 width=4
             )
-        
+            if segment.line:
+                self._describe_route(nodes=segment.nodes, description=segment.line, text_color="#4A148C")
+
         self._fit_bounding_box(nodes=all_nodes)
 
     def _fit_bounding_box(self, nodes: list[tuple[float, float]]):
